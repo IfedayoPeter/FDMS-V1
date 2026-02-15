@@ -1,0 +1,8 @@
+{
+  "name": "Front Desk Management System",
+  "description": "A high-performance kiosk and admin portal for managing office visitors, deliveries, and key logs with AI-powered insights.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}
