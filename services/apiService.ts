@@ -26,8 +26,25 @@ type CreateVisitorRequest = Omit<Visitor, "id" | "checkOutTime">;
 type UpdateVisitorRequest = Omit<Visitor, "id">;
 
 // Configuration
-const API_BASE_URL =
-  process.env.REACT_APP_API_URL || "https://localhost:7146/api";
+const rawApiBaseUrl =
+  import.meta.env.VITE_API_URL ||
+  process.env.REACT_APP_API_URL ||
+  "https://localhost:7146/api";
+
+const API_BASE_URL = (() => {
+  let resolved = String(rawApiBaseUrl).trim().replace(/\/+$/, "");
+
+  // Prevent mixed-content failures when frontend is served over HTTPS (e.g., Vercel).
+  if (
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    resolved.startsWith("http://")
+  ) {
+    resolved = resolved.replace("http://", "https://");
+  }
+
+  return resolved;
+})();
 // const TIMEOUT = 10000; // 10 seconds
 
 interface ApiResponse<T> {
@@ -119,7 +136,8 @@ async function apiCall<T>(
   body?: any,
   queryParams?: Record<string, any>,
 ): Promise<T> {
-  const url = new URL(`${API_BASE_URL}${endpoint}`);
+  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const url = new URL(`${API_BASE_URL}${normalizedEndpoint}`);
   const mutationCall = isMutationMethod(method);
   const notifyMutation = mutationCall && shouldShowMutationPopup(endpoint);
   const actionId = ++actionFeedbackCounter;
