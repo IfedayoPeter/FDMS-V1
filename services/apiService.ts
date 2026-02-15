@@ -37,10 +37,10 @@ const API_BASE_URL = (() => {
   // Prevent mixed-content failures when frontend is served over HTTPS (e.g., Vercel).
   if (
     typeof window !== "undefined" &&
-    window.location.protocol === "https:" &&
+    window.location.protocol === "http:" &&
     resolved.startsWith("http://")
   ) {
-    resolved = resolved.replace("http://", "https://");
+    resolved = resolved.replace("http://", "http://");
   }
 
   return resolved;
@@ -136,7 +136,9 @@ async function apiCall<T>(
   body?: any,
   queryParams?: Record<string, any>,
 ): Promise<T> {
-  const normalizedEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+  const normalizedEndpoint = endpoint.startsWith("/")
+    ? endpoint
+    : `/${endpoint}`;
   const url = new URL(`${API_BASE_URL}${normalizedEndpoint}`);
   const mutationCall = isMutationMethod(method);
   const notifyMutation = mutationCall && shouldShowMutationPopup(endpoint);
