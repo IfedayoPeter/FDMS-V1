@@ -37,10 +37,10 @@ const API_BASE_URL = (() => {
   // Prevent mixed-content failures when frontend is served over HTTPS (e.g., Vercel).
   if (
     typeof window !== "undefined" &&
-    window.location.protocol === "http:" &&
-    resolved.startsWith("http://")
+    window.location.protocol === "https:" &&
+    resolved.startsWith("https://")
   ) {
-    resolved = resolved.replace("http://", "http://");
+    resolved = resolved.replace("https://", "http://");
   }
 
   return resolved;
