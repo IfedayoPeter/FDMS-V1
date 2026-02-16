@@ -38,9 +38,9 @@ const API_BASE_URL = (() => {
   if (
     typeof window !== "undefined" &&
     window.location.protocol === "https:" &&
-    resolved.startsWith("https://")
+    resolved.startsWith("http://")
   ) {
-    resolved = resolved.replace("https://", "http://");
+    resolved = resolved.replace("http://", "https://");
   }
 
   return resolved;
