@@ -64,20 +64,14 @@ const App: React.FC = () => {
               hasError: true,
               errorMessage: getApiErrorMessage(error, "Failed to load key logs"),
             })),
-            apiService.settings.getAll().catch((error) => ({
-              hasError: true,
-              errorMessage: getApiErrorMessage(
-                error,
-                "Failed to load settings",
-              ),
-            })),
+            apiService.settings.getAll().catch(() => null),
             apiService.host.getAll().catch((error) => ({
               hasError: true,
               errorMessage: getApiErrorMessage(error, "Failed to load hosts"),
             })),
           ]);
 
-        const settings: SystemSettings | null = getApiContent(
+        const settings: SystemSettings | null = getApiContent<SystemSettings | null>(
           settingsData,
           null,
           "settings",
@@ -206,8 +200,11 @@ const App: React.FC = () => {
               borrowedDate.toDateString() !== todayStr || currentHour >= 18;
 
             if (isOverdue) {
+              const borrowerId = Number(log.borrower);
               const host = hosts.find(
-                (h) => h.id === log.borrower || h.fullName === log.borrowerName,
+                (h) =>
+                  (!Number.isNaN(borrowerId) && h.id === borrowerId) ||
+                  h.fullName === log.borrowerName,
               );
               const borrowerEmail = host?.email || "staff@company.com";
               const adminEmail =
