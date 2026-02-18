@@ -1,5 +1,7 @@
 
 import { Host, SystemSettings } from "../types";
+import apiService from "./apiService";
+import { getApiContent } from "./apiResponse";
 
 export interface HostAvailability {
   status: 'Available' | 'Busy';
@@ -7,98 +9,99 @@ export interface HostAvailability {
   currentEventSummary?: string;
 }
 
+export interface WorkspaceSyncSummary {
+  totalFetched: number;
+  totalSynced: number;
+  createdCount: number;
+  updatedCount: number;
+}
+
+export interface WorkspaceDirectorySyncResult {
+  hosts: Partial<Host>[];
+  summary?: WorkspaceSyncSummary;
+}
+
 /**
  * WorkspaceService handles the integration with Google Workspace API.
  */
 export const workspaceService = {
   /**
-   * Simulates an OAuth2 authorization handshake
+   * Verifies backend Google Workspace connectivity/authorization.
    */
   authorize: async (): Promise<boolean> => {
-    console.log("Initiating Google OAuth2 Handshake...");
-    await new Promise(r => setTimeout(r, 1500));
-    return true;
+    try {
+      const response = await apiService.workspace.authorize();
+      const payload = getApiContent<any>(response, { authorized: false });
+      return Boolean(payload?.authorized);
+    } catch (error) {
+      console.error("Workspace authorization failed", error);
+      return false;
+    }
   },
 
   /**
-   * Syncs the directory from Google Workspace.
+   * Syncs host directory from Google Workspace.
    */
-  fetchDirectory: async (domain: string): Promise<Partial<Host>[]> => {
-    console.log(`Syncing directory for domain: ${domain}`);
-    await new Promise(r => setTimeout(r, 2000));
-    
-    return [
-      {
-        fullName: "Alex Workspace",
-        email: `alex@${domain}`,
-        department: "Operations",
-        googleId: "gw-12345",
-        status: "Active",
-        isWorkspaceSynced: true,
-        googleChatSpaceId: "spaces/operations_hub"
-      },
-      {
-        fullName: "Jordan Tech",
-        email: `jordan@${domain}`,
-        department: "Engineering",
-        googleId: "gw-67890",
-        status: "Active",
-        isWorkspaceSynced: true,
-        googleChatSpaceId: "spaces/engineering_alerts"
-      },
-      {
-        fullName: "Taylor HR",
-        email: `taylor@${domain}`,
-        department: "Human Resources",
-        googleId: "gw-11223",
-        status: "Active",
-        isWorkspaceSynced: true,
-        googleChatSpaceId: "spaces/hr_notifications"
-      }
-    ];
+  fetchDirectory: async (
+    domain: string,
+    useCustomerDirectory = false,
+  ): Promise<WorkspaceDirectorySyncResult> => {
+    const response = await apiService.workspace.syncDirectory(
+      domain,
+      useCustomerDirectory,
+    );
+    const payload = getApiContent<any>(response, [], "workspace directory");
+
+    if (Array.isArray(payload)) {
+      return { hosts: payload };
+    }
+
+    return {
+      hosts: Array.isArray(payload?.hosts) ? payload.hosts : [],
+      summary: payload?.summary
+        ? {
+            totalFetched: Number(payload.summary.totalFetched || 0),
+            totalSynced: Number(payload.summary.totalSynced || 0),
+            createdCount: Number(payload.summary.createdCount || 0),
+            updatedCount: Number(payload.summary.updatedCount || 0),
+          }
+        : undefined,
+    };
   },
 
   /**
-   * Fetches mock availability from Google Calendar
+   * Fetches host availability from Google Calendar
    */
   getHostAvailability: async (host: Host, settings: SystemSettings): Promise<HostAvailability> => {
-    // FIX: Added optional chaining to prevent "Cannot read properties of undefined (reading 'enabled')"
     if (!settings?.workspace?.enabled || !settings?.workspace?.calendarEnabled) {
       return { status: 'Available' };
     }
 
-    console.log(`[Google Calendar Sync] Checking availability for ${host.email}...`);
-    await new Promise(r => setTimeout(r, 1200));
-
-    // Simple deterministic mock: Hosts with 'Tech' or 'Engineering' in name are Busy
-    const isBusy = host.fullName.includes('Tech') || host.department.includes('Engineering');
-
-    if (isBusy) {
-      const later = new Date();
-      later.setMinutes(later.getMinutes() + 45);
-      return { 
-        status: 'Busy', 
-        nextAvailableTime: later.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        currentEventSummary: "Internal Technical Sync"
-      };
+    try {
+      const response = await apiService.workspace.getAvailability(host.email);
+      return getApiContent<HostAvailability>(response, { status: "Available" });
+    } catch (error) {
+      console.error("Calendar availability check failed", error);
+      return { status: "Available" };
     }
-
-    return { status: 'Available' };
   },
 
   /**
    * Sends a message to a Google Chat Space or Webhook
    */
   sendChatMessage: async (host: Host, message: string, settings: SystemSettings): Promise<boolean> => {
-    // FIX: Added optional chaining
     if (!settings?.workspace?.enabled || !settings?.workspace?.chatNotificationsEnabled) return false;
 
-    // Use the host's specific space ID or fall back to a global webhook if configured
     const target = host.googleChatSpaceId || settings.workspace.webhookUrl;
     if (!target) return false;
 
-    console.log(`[Google Chat Sync] Dispatching to ${host.fullName} (${target}): ${message}`);
-    await new Promise(r => setTimeout(r, 800));
-    return true;
+    try {
+      const response = await apiService.workspace.sendChatMessage(target, message);
+      const payload = getApiContent<any>(response, { sent: false });
+      return Boolean(payload?.sent);
+    } catch (error) {
+      console.error("Google Chat message send failed", error);
+      return false;
+    }
   }
 };

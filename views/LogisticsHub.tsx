@@ -126,6 +126,9 @@ const LogisticsHub: React.FC = () => {
   const [activeAssets, setActiveAssets] = useState<AssetMovement[]>([]);
   const [deliveryTypes, setDeliveryTypes] = useState<DeliveryTypeOption[]>([]);
   const [availableStations, setAvailableStations] = useState<string[]>([]);
+  const [cachedSettings, setCachedSettings] = useState<SystemSettings | null>(
+    null,
+  );
 
   const [assetSearch, setAssetSearch] = useState("");
 
@@ -194,8 +197,16 @@ const LogisticsHub: React.FC = () => {
   const hostResultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     const loadData = async () => {
       try {
+        const toEnvelopeError = (error: unknown, fallback: string) => {
+          if ((error as any)?.name === "AbortError") throw error;
+          return {
+            hasError: true,
+            errorMessage: getApiErrorMessage(error, fallback),
+          };
+        };
         const sess = localStorage.getItem("securitySession");
         if (!sess) {
           navigate("/security-login?redirect=/logistics");
@@ -212,42 +223,27 @@ const LogisticsHub: React.FC = () => {
           deliveryTypesResp,
         ] =
           await Promise.all([
-            apiService.host.getAll().catch((error) => ({
-              hasError: true,
-              errorMessage: getApiErrorMessage(error, "Failed to load hosts"),
-            })),
-            apiService.movementReason.getAll().catch((error) => ({
-              hasError: true,
-              errorMessage: getApiErrorMessage(
-                error,
-                "Failed to load movement reasons",
+            apiService
+              .host.getAll(undefined, { signal: controller.signal })
+              .catch((error) => toEnvelopeError(error, "Failed to load hosts")),
+            apiService
+              .movementReason.getAll(undefined, { signal: controller.signal })
+              .catch((error) =>
+                toEnvelopeError(error, "Failed to load movement reasons"),
               ),
-            })),
-            apiService.settings.getAll().catch((error) => ({
-              hasError: true,
-              errorMessage: getApiErrorMessage(
-                error,
-                "Failed to load settings",
-              ),
-            })),
+            apiService
+              .settings.getAll({ signal: controller.signal })
+              .catch((error) => toEnvelopeError(error, "Failed to load settings")),
             apiService.assetMovement
-              .getAll({ filter: "status=Off-site" })
-              .catch((error) => ({
-                hasError: true,
-                errorMessage: getApiErrorMessage(
-                  error,
-                  "Failed to load asset movements",
-                ),
-              })),
+              .getAll({ filter: "status=Off-site" }, { signal: controller.signal })
+              .catch((error) =>
+                toEnvelopeError(error, "Failed to load asset movements"),
+              ),
             apiService.deliveryType
-              .getAll({ page: 1, pageSize: 100 })
-              .catch((error) => ({
-                hasError: true,
-                errorMessage: getApiErrorMessage(
-                  error,
-                  "Failed to load delivery types",
-                ),
-              })),
+              .getAll({ page: 1, pageSize: 100 }, { signal: controller.signal })
+              .catch((error) =>
+                toEnvelopeError(error, "Failed to load delivery types"),
+              ),
           ]);
 
         setHosts(getApiContent(hostsResp, [], "hosts"));
@@ -270,6 +266,7 @@ const LogisticsHub: React.FC = () => {
         }
 
         const settings = getApiContent<any>(settingsResp, null, "settings");
+        setCachedSettings(settings);
         if (settings && settings.kiosk) {
           const stations = settings.securityStations?.content || [];
           setAvailableStations(stations);
@@ -324,6 +321,7 @@ const LogisticsHub: React.FC = () => {
           processedBy: parsedSess.name,
         }));
       } catch (error) {
+        if ((error as any)?.name === "AbortError") return;
         console.error(
           "Error loading data:",
           getApiErrorMessage(error, "Failed to load logistics data"),
@@ -331,7 +329,7 @@ const LogisticsHub: React.FC = () => {
       }
     };
 
-    loadData();
+    void loadData();
 
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -342,7 +340,10 @@ const LogisticsHub: React.FC = () => {
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      controller.abort();
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -399,12 +400,16 @@ const LogisticsHub: React.FC = () => {
     setWorkflow("success");
 
     try {
-      const settingsResponse = await apiService.settings.getAll();
-      const settings: SystemSettings | null = getApiContent<SystemSettings>(
-        settingsResponse,
-        null,
-        "settings",
-      );
+      let settings = cachedSettings;
+      if (!settings) {
+        const settingsResponse = await apiService.settings.getAll();
+        settings = getApiContent<SystemSettings>(
+          settingsResponse,
+          null,
+          "settings",
+        );
+        setCachedSettings(settings);
+      }
       const sender = settings?.kiosk?.senderEmail || "notifications@system.com";
 
       if (lastFormStep === "delivery") {

@@ -87,13 +87,14 @@ const DeliveryEntry: React.FC = () => {
   }, [step, capturedImage]);
 
   useEffect(() => {
+    const controller = new AbortController();
     const loadDeliveryTypes = async () => {
       setLoadingDeliveryTypes(true);
       try {
         const response = await apiService.deliveryType.getAll({
           page: 1,
           pageSize: 100,
-        });
+        }, { signal: controller.signal });
         const types = getApiContent<DeliveryTypeOption[]>(
           response,
           [],
@@ -111,6 +112,7 @@ const DeliveryEntry: React.FC = () => {
           });
         }
       } catch (err) {
+        if ((err as any)?.name === "AbortError") return;
         console.error("Failed to load delivery types", err);
         setError(getApiErrorMessage(err, "Failed to load delivery types"));
       } finally {
@@ -118,7 +120,8 @@ const DeliveryEntry: React.FC = () => {
       }
     };
 
-    loadDeliveryTypes();
+    void loadDeliveryTypes();
+    return () => controller.abort();
   }, []);
 
   const startCamera = async () => {

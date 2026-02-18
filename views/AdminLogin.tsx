@@ -36,23 +36,28 @@ const AdminLogin: React.FC<Props> = ({ onLogin }) => {
   const [loadingMessage, setLoadingMessage] = useState("Loading Admin Console");
 
   useEffect(() => {
+    const controller = new AbortController();
     // Load system branding configuration from API (if available)
     const loadSettings = async () => {
       setLoadingOverlay(true);
       setLoadingMessage("Loading Admin Console");
       try {
-        const response = await apiService.settings.getAll();
+        const response = await apiService.settings.getAll({
+          signal: controller.signal,
+        });
         const settings = getApiContent<any>(response, null, "system settings");
         if (settings?.kiosk?.logoUrl) setLogoUrl(settings.kiosk.logoUrl);
         if (settings?.kiosk?.companyName)
           setCompanyName(settings.kiosk.companyName);
       } catch (e) {
+        if ((e as any)?.name === "AbortError") return;
         console.error("Failed to load system settings from API", e);
       } finally {
         setLoadingOverlay(false);
       }
     };
-    loadSettings();
+    void loadSettings();
+    return () => controller.abort();
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {

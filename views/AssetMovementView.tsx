@@ -105,6 +105,7 @@ const AssetMovementView: React.FC = () => {
   };
 
   useEffect(() => {
+    const controller = new AbortController();
     const loadData = async () => {
       setLoading(true);
       setError("");
@@ -112,12 +113,18 @@ const AssetMovementView: React.FC = () => {
       setLoadingMessage("Loading Asset Movements");
       try {
         // Load active asset movements from API
-        const allAssetsResponse = await apiService.assetMovement.getAll();
+        const allAssetsResponse = await apiService.assetMovement.getAll(
+          undefined,
+          { signal: controller.signal },
+        );
         const allAssets = getApiContent<AssetMovement[]>(allAssetsResponse, []);
         setActiveAssets(allAssets.filter((a) => a.status !== "On-site"));
 
         // Load movement reasons from API
-        const reasonsResponse = await apiService.movementReason.getAll();
+        const reasonsResponse = await apiService.movementReason.getAll(
+          undefined,
+          { signal: controller.signal },
+        );
         const reasonsList = getApiContent<MovementReason[]>(
           reasonsResponse,
           [],
@@ -141,6 +148,7 @@ const AssetMovementView: React.FC = () => {
           setFormData((prev) => ({ ...prev, reason: defaults[0].name }));
         }
       } catch (err) {
+        if ((err as any)?.name === "AbortError") return;
         console.error("Failed to load asset data", err);
         setError(getApiErrorMessage(err, "Failed to load asset data"));
       } finally {
@@ -149,7 +157,8 @@ const AssetMovementView: React.FC = () => {
       }
     };
 
-    loadData();
+    void loadData();
+    return () => controller.abort();
   }, []);
 
   const performCheckout = async () => {

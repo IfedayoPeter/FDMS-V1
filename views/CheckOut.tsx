@@ -44,6 +44,10 @@ const CheckOut: React.FC = () => {
   );
   const [securitySession, setSecuritySession] = useState<any>(null);
   const [notificationError, setNotificationError] = useState("");
+  const [cachedSettings, setCachedSettings] = useState<SystemSettings | null>(
+    null,
+  );
+  const [cachedHosts, setCachedHosts] = useState<Host[] | null>(null);
 
   // Stage 3: Group Checkout State
   const [groupLeadToConfirm, setGroupLeadToConfirm] = useState<Visitor | null>(
@@ -52,6 +56,7 @@ const CheckOut: React.FC = () => {
   const [isCheckingOutWholeGroup, setIsCheckingOutWholeGroup] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
     const sess = localStorage.getItem("securitySession");
     if (!sess) {
       navigate("/security-login?redirect=/check-out");
@@ -65,14 +70,16 @@ const CheckOut: React.FC = () => {
           filter: "status=In",
           page: 1,
           pageSize: 100,
-        });
+        }, { signal: controller.signal });
         setActiveVisitors(getApiContent(response, [], "active visitors"));
       } catch (e) {
+        if ((e as any)?.name === "AbortError") return;
         console.error("Failed to load active visitors", e);
       }
     };
 
-    loadActiveVisitors();
+    void loadActiveVisitors();
+    return () => controller.abort();
   }, [navigate]);
 
   useEffect(() => {
@@ -134,14 +141,20 @@ const CheckOut: React.FC = () => {
 
       // Load settings and create notifications
       try {
-        const settingsResponse = await apiService.settings.getAll();
-        const settings = getApiContent<SystemSettings>(
-          settingsResponse,
-          null,
-          "settings",
-        );
-        const hostsResponse = await apiService.host.getAll();
-        const hosts: Host[] = getApiContent(hostsResponse, [], "hosts");
+        let settings = cachedSettings;
+        if (!settings) {
+          const settingsResponse = await apiService.settings.getAll();
+          settings = getApiContent<SystemSettings>(settingsResponse, null, "settings");
+          setCachedSettings(settings);
+        }
+
+        let hosts = cachedHosts;
+        if (!hosts) {
+          const hostsResponse = await apiService.host.getAll();
+          hosts = getApiContent<Host[]>(hostsResponse, [], "hosts");
+          setCachedHosts(hosts);
+        }
+
         const sender =
           settings?.kiosk?.senderEmail || "notifications@system.com";
 

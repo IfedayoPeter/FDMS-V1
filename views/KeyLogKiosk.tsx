@@ -72,6 +72,9 @@ const KeyLogKiosk: React.FC = () => {
   >(null);
   const [isSendingNotifications, setIsSendingNotifications] = useState(false);
   const [notificationError, setNotificationError] = useState("");
+  const [cachedSettings, setCachedSettings] = useState<SystemSettings | null>(
+    null,
+  );
 
   // Borrowing Form State
   const [selectedKey, setSelectedKey] = useState<KeyAsset | null>(null);
@@ -111,6 +114,7 @@ const KeyLogKiosk: React.FC = () => {
   const returnerResultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     // Session check
     const sess = localStorage.getItem("securitySession");
     if (!sess) {
@@ -123,25 +127,29 @@ const KeyLogKiosk: React.FC = () => {
     const loadData = async () => {
       try {
         // Load keys from API
-        const keysResponse = await apiService.keyAsset.getAll();
+        const keysResponse = await apiService.keyAsset.getAll(undefined, {
+          signal: controller.signal,
+        });
         setAvailableKeys(
           getApiContent(keysResponse, [], "key assets"),
         );
 
         // Load hosts from API
-        const hostsResponse = await apiService.host.getAll();
+        const hostsResponse = await apiService.host.getAll(undefined, {
+          signal: controller.signal,
+        });
         setHosts(getApiContent(hostsResponse, [], "hosts"));
 
         // Load active key logs from API
         const logsResponse = await apiService.keyLog.getAll({
           filter: "status=Out",
-        });
+        }, { signal: controller.signal });
         setActiveLogs(getApiContent(logsResponse, [], "key logs"));
 
         // Load security officers from API
         const offResponse = await apiService.securityOfficer.getAll({
           filter: "status:Active",
-        });
+        }, { signal: controller.signal });
         const officerList = getApiContent<SecurityOfficer[]>(
           offResponse,
           [],
@@ -153,11 +161,12 @@ const KeyLogKiosk: React.FC = () => {
         );
         if (current) setSelectedOfficer(current);
       } catch (e) {
+        if ((e as any)?.name === "AbortError") return;
         console.error("Failed to load key log data", e);
       }
     };
 
-    loadData();
+    void loadData();
 
     // Borrowing reasons (could also come from API)
     const reasonsList = [
@@ -195,7 +204,10 @@ const KeyLogKiosk: React.FC = () => {
         setShowReturnerResults(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      controller.abort();
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -252,13 +264,16 @@ const KeyLogKiosk: React.FC = () => {
     setMode("success");
 
     try {
-      // Load settings from API for notification templates
-      const settingsResponse = await apiService.settings.getAll();
-      const settings = getApiContent<SystemSettings | null>(
-        settingsResponse,
-        null,
-        "settings",
-      );
+      let settings = cachedSettings;
+      if (!settings) {
+        const settingsResponse = await apiService.settings.getAll();
+        settings = getApiContent<SystemSettings | null>(
+          settingsResponse,
+          null,
+          "settings",
+        );
+        setCachedSettings(settings);
+      }
       const sender =
         settings?.kiosk?.senderEmail || "notifications@system.com";
       const now = new Date();

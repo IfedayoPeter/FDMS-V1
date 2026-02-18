@@ -68,6 +68,10 @@ interface ApiEnvelopeLike {
   message?: string;
 }
 
+type RequestOptions = {
+  signal?: AbortSignal;
+};
+
 export const ACTION_FEEDBACK_EVENT = "fdm:action-feedback";
 
 export type ActionFeedbackPhase = "loading" | "success" | "error";
@@ -135,6 +139,7 @@ async function apiCall<T>(
   endpoint: string,
   body?: any,
   queryParams?: Record<string, any>,
+  requestOptions?: RequestOptions,
 ): Promise<T> {
   const normalizedEndpoint = endpoint.startsWith("/")
     ? endpoint
@@ -164,8 +169,6 @@ async function apiCall<T>(
     options.body = JSON.stringify(body);
   }
 
-  const controller = new AbortController();
-  // const timeoutId = setTimeout(() => controller.abort(), TIMEOUT);
 
   try {
     if (notifyMutation) {
@@ -178,7 +181,7 @@ async function apiCall<T>(
 
     const response = await fetch(url.toString(), {
       ...options,
-      signal: controller.signal,
+      signal: requestOptions?.signal,
     });
 
     // clearTimeout(timeoutId);
@@ -292,8 +295,8 @@ export const visitorAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/Visitors", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/Visitors", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -346,8 +349,8 @@ export const watchlistAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/Watchlist", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/Watchlist", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -392,8 +395,8 @@ export const securityOfficerAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/SecurityOfficers", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/SecurityOfficers", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -445,8 +448,8 @@ export const securityAlertAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/SecurityAlerts", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/SecurityAlerts", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -487,8 +490,8 @@ export const deliveryAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/Deliveries", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/Deliveries", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -535,8 +538,8 @@ export const assetMovementAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/AssetMovements", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/AssetMovements", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -589,8 +592,8 @@ export const keyLogAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/KeyLogs", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/KeyLogs", undefined, filters, requestOptions);
   },
 
   getById: (id: number | string) => {
@@ -639,8 +642,8 @@ export const hostAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/Hosts", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/Hosts", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -681,8 +684,8 @@ export const keyAssetAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/KeyAssets", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/KeyAssets", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -723,8 +726,8 @@ export const movementReasonAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/MovementReasons", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/MovementReasons", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -765,8 +768,8 @@ export const visitorReasonAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/VisitorReasons", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/VisitorReasons", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -811,8 +814,8 @@ export const notificationLogAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/NotificationLogs", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/NotificationLogs", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -837,8 +840,8 @@ export const notificationLogAPI = {
 // ============================================================
 
 export const settingsAPI = {
-  getAll: () => {
-    return apiCall<SystemSettings>("GET", "/SystemSettings");
+  getAll: (requestOptions?: RequestOptions) => {
+    return apiCall<SystemSettings>("GET", "/SystemSettings", undefined, undefined, requestOptions);
   },
 
   update: (settings: Partial<SystemSettings>) => {
@@ -867,6 +870,74 @@ export const settingsAPI = {
 };
 
 // ============================================================
+// GOOGLE WORKSPACE INTEGRATION
+// ============================================================
+
+export const workspaceAPI = {
+  authorize: () => {
+    return apiCall<{
+      authorized: boolean;
+      message?: string;
+    }>("POST", "/GoogleWorkspace/authorize");
+  },
+
+  syncDirectory: (domain: string, useCustomerDirectory = false) => {
+    return apiCall<
+      | Array<{
+          fullName?: string;
+          department?: string;
+          phone?: string;
+          email?: string;
+          status?: string;
+          googleId?: string;
+          googleChatSpaceId?: string;
+          isWorkspaceSynced?: boolean;
+        }>
+      | {
+          summary?: {
+            totalFetched?: number;
+            totalSynced?: number;
+            createdCount?: number;
+            updatedCount?: number;
+          };
+          hosts?: Array<{
+            fullName?: string;
+            department?: string;
+            phone?: string;
+            email?: string;
+            status?: string;
+            googleId?: string;
+            googleChatSpaceId?: string;
+            isWorkspaceSynced?: boolean;
+          }>;
+        }
+    >("POST", "/GoogleWorkspace/directory/sync", {
+      domain,
+      useCustomerDirectory,
+    });
+  },
+
+  getAvailability: (email: string, lookAheadMinutes = 60) => {
+    return apiCall<{
+      status: "Available" | "Busy";
+      nextAvailableTime?: string;
+      currentEventSummary?: string;
+    }>("POST", "/GoogleWorkspace/calendar/availability", {
+      email,
+      lookAheadMinutes,
+    });
+  },
+
+  sendChatMessage: (target: string, message: string) => {
+    return apiCall<{ sent: boolean; message?: string }>(
+      "POST",
+      "/GoogleWorkspace/chat/send",
+      { target, message },
+    );
+  },
+};
+
+// ============================================================
 // SECURITY STATIONS
 // ============================================================
 
@@ -887,8 +958,8 @@ export const securityStationAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/SecurityStations", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/SecurityStations", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -936,8 +1007,8 @@ export const deliveryTypeAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/DeliveryTypes", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/DeliveryTypes", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -985,8 +1056,8 @@ export const visitorTypeAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/VisitorTypes", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/VisitorTypes", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -1034,8 +1105,8 @@ export const keyBorrowingReasonAPI = {
     select?: string;
     orderBy?: string;
     orderDirection?: number;
-  }) => {
-    return apiCall<any>("GET", "/KeyBorrowingReasons", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/KeyBorrowingReasons", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -1095,8 +1166,8 @@ export const baseUserAPI = {
     page?: number;
     pageSize?: number;
     select?: string;
-  }) => {
-    return apiCall<any>("GET", "/BaseUser", undefined, filters);
+  }, requestOptions?: RequestOptions) => {
+    return apiCall<any>("GET", "/BaseUser", undefined, filters, requestOptions);
   },
 
   getById: (id: number) => {
@@ -1185,6 +1256,7 @@ export default {
   visitorReason: visitorReasonAPI,
   notificationLog: notificationLogAPI,
   settings: settingsAPI,
+  workspace: workspaceAPI,
   admin: adminAPI,
   baseUser: baseUserAPI,
   securityStation: securityStationAPI,
@@ -1194,3 +1266,5 @@ export default {
   analytics: analyticsAPI,
   system: systemAPI,
 };
+
+

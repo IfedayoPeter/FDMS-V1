@@ -66,6 +66,25 @@ const getDateTimeLocalValue = (date: Date = new Date()) => {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 };
 
+const normalizePhone = (value: string) => value.replace(/\D/g, "");
+
+type ReturningVisitorRecord = Pick<
+  Visitor,
+  | "name"
+  | "phone"
+  | "email"
+  | "company"
+  | "host"
+  | "purpose"
+  | "location"
+  | "visitorType"
+  | "licensePlate"
+  | "expectedDuration"
+  | "status"
+  | "photo"
+  | "checkInTime"
+>;
+
 const CheckIn: React.FC = () => {
   const { t } = useLanguage();
   const navigate = useNavigate();
@@ -86,6 +105,9 @@ const CheckIn: React.FC = () => {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [isReturningGuest, setIsReturningGuest] = useState(false);
+  const [cachedSettings, setCachedSettings] = useState<SystemSettings | null>(
+    null,
+  );
   const [availableHosts, setAvailableHosts] = useState<Host[]>([]);
   const [availablePurposes, setAvailablePurposes] = useState<string[]>([
     "Meeting",
@@ -108,6 +130,11 @@ const CheckIn: React.FC = () => {
   const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
   const [securitySession, setSecuritySession] = useState<any>(null);
   const [notificationError, setNotificationError] = useState("");
+  const [previousVisitors, setPreviousVisitors] = useState<
+    ReturningVisitorRecord[]
+  >([]);
+  const [selectedReturningVisitor, setSelectedReturningVisitor] =
+    useState<ReturningVisitorRecord | null>(null);
 
   // Stage 2: Member Names State
   const [groupMemberNames, setGroupMemberNames] = useState<string[]>([]);
@@ -162,6 +189,7 @@ const CheckIn: React.FC = () => {
   };
 
   useEffect(() => {
+    const controller = new AbortController();
     const sess = localStorage.getItem("securitySession");
     if (!sess) {
       navigate("/security-login?redirect=/check-in");
@@ -179,12 +207,15 @@ const CheckIn: React.FC = () => {
         // Load hosts from API
         const hostsResponse = await apiService.host.getAll({
           filter: "status:Active",
-        });
+        }, { signal: controller.signal });
         const hosts = getApiContent<Host[]>(hostsResponse, [], "hosts");
         setAvailableHosts(hosts);
 
         // Load purposes from API (visit purposes)
-        const purposesResponse = await apiService.movementReason.getAll();
+        const purposesResponse = await apiService.movementReason.getAll(
+          undefined,
+          { signal: controller.signal },
+        );
         const purposes = getApiContent<any[]>(
           purposesResponse,
           [],
@@ -199,7 +230,10 @@ const CheckIn: React.FC = () => {
         }
 
         // Load visitor types from API
-        const visitorTypesResponse = await apiService.visitorType.getAll();
+        const visitorTypesResponse = await apiService.visitorType.getAll(
+          undefined,
+          { signal: controller.signal },
+        );
         const visitorTypes = getApiContent<any[]>(
           visitorTypesResponse,
           [],
@@ -210,13 +244,79 @@ const CheckIn: React.FC = () => {
           setAvailableVisitorTypes(typeNames);
           setFormData((prev) => ({ ...prev, visitorType: typeNames[0] }));
         }
+
+        // Load previous visitors for returning-guest suggestions
+        const visitorsResponse = await apiService.visitor.getAll({
+          pageSize: 500,
+          orderBy: "checkInTime",
+          orderDirection: 2,
+        }, { signal: controller.signal });
+        const visitorRecords = getApiContent<any[]>(
+          visitorsResponse,
+          [],
+          "visitors",
+        );
+        const normalizedMap = new Map<string, ReturningVisitorRecord>();
+
+        visitorRecords.forEach((raw) => {
+          const record: ReturningVisitorRecord = {
+            name: raw?.name || "",
+            phone: raw?.phone || "",
+            email: raw?.email || "",
+            company: raw?.company || "",
+            host: raw?.host || "",
+            purpose: raw?.purpose || "",
+            location: raw?.location || "",
+            visitorType: raw?.visitorType || "Guest",
+            licensePlate: raw?.licensePlate || "",
+            expectedDuration: raw?.expectedDuration || "1 Hour",
+            status: raw?.status || "Out",
+            photo: raw?.photo,
+            checkInTime: raw?.checkInTime || "",
+          };
+          const normalized = normalizePhone(record.phone);
+          if (!normalized || record.phone.startsWith("GRP-")) return;
+          if (!normalizedMap.has(normalized)) {
+            normalizedMap.set(normalized, record);
+          }
+        });
+        setPreviousVisitors(Array.from(normalizedMap.values()));
       } catch (e) {
+        if ((e as any)?.name === "AbortError") return;
         console.error("Failed to load data from API", e);
+        // Keep check-in usable with local cache if API visitor lookup fails.
+        const cachedVisitors: Visitor[] = JSON.parse(
+          localStorage.getItem("visitors") || "[]",
+        );
+        const normalizedMap = new Map<string, ReturningVisitorRecord>();
+        cachedVisitors.forEach((v) => {
+          const normalized = normalizePhone(v.phone || "");
+          if (!normalized || (v.phone || "").startsWith("GRP-")) return;
+          if (!normalizedMap.has(normalized)) {
+            normalizedMap.set(normalized, {
+              name: v.name,
+              phone: v.phone,
+              email: v.email,
+              company: v.company,
+              host: v.host,
+              purpose: v.purpose,
+              location: v.location,
+              visitorType: v.visitorType,
+              licensePlate: v.licensePlate,
+              expectedDuration: v.expectedDuration,
+              status: v.status,
+              photo: v.photo,
+              checkInTime: v.checkInTime,
+            });
+          }
+        });
+        setPreviousVisitors(Array.from(normalizedMap.values()));
         setError(getApiErrorMessage(e, "Failed to load check-in data"));
       }
     };
 
-    loadData();
+    void loadData();
+    return () => controller.abort();
   }, [navigate]);
 
   useEffect(() => {
@@ -355,43 +455,27 @@ const CheckIn: React.FC = () => {
 
   const handlePhoneSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (phone.length < 8) {
+    const normalizedPhone = normalizePhone(phone);
+    if (normalizedPhone.length < 8) {
       setError("Invalid phone number.");
       return;
     }
 
-    const visitors: Visitor[] = JSON.parse(
-      localStorage.getItem("visitors") || "[]",
-    );
-    const existing = visitors.find((v) => v.phone === phone);
+    const existing =
+      selectedReturningVisitor ||
+      previousVisitors.find((v) => normalizePhone(v.phone) === normalizedPhone);
 
     if (existing) {
       if (existing.status === "In") {
         setStep("already-in");
       } else {
         setIsReturningGuest(true);
-        setFormData({
-          name: existing.name,
-          email: existing.email,
-          company: existing.company,
-          host: "",
-          purpose: availablePurposes[0],
-          location: existing.location,
-          visitorType: existing.visitorType || availableVisitorTypes[0],
-          licensePlate: existing.licensePlate || "",
-          expectedDuration: existing.expectedDuration || "1 Hour",
-          checkInTime: getDateTimeLocalValue(),
-          status: "In",
-          processedBy: securitySession?.name || formData.processedBy || "",
-          groupSize: 1,
-        });
-        if (existing.photo) {
-          setCapturedImage(existing.photo);
-        }
+        setSelectedReturningVisitor(existing);
         setStep("location");
       }
     } else {
       setIsReturningGuest(false);
+      setSelectedReturningVisitor(null);
       setCapturedImage(null);
       setSignatureImage(null);
       setFormData((prev) => ({
@@ -402,6 +486,56 @@ const CheckIn: React.FC = () => {
       }));
       setStep("location");
     }
+  };
+
+  const applyVisitorPrefillForCampus = (campus: string) => {
+    const previous = selectedReturningVisitor;
+
+    if (previous) {
+      setFormData({
+        name: previous.name || "",
+        email: previous.email || "",
+        company: previous.company || "",
+        host: previous.host || "",
+        purpose:
+          previous.purpose && availablePurposes.includes(previous.purpose)
+            ? previous.purpose
+            : availablePurposes[0],
+        location: campus,
+        visitorType:
+          previous.visitorType &&
+          availableVisitorTypes.includes(previous.visitorType)
+            ? previous.visitorType
+            : availableVisitorTypes[0],
+        licensePlate: previous.licensePlate || "",
+        expectedDuration: previous.expectedDuration || "1 Hour",
+        checkInTime: getDateTimeLocalValue(),
+        status: "In",
+        processedBy: securitySession?.name || formData.processedBy || "",
+        groupSize: 1,
+      });
+      setCapturedImage(previous.photo || null);
+      const matchedHost =
+        availableHosts.find(
+          (h) =>
+            h.status === "Active" &&
+            h.fullName.toLowerCase() === (previous.host || "").toLowerCase(),
+        ) || null;
+      setSelectedHostObj(matchedHost);
+      setShowHostResults(false);
+      return;
+    }
+
+    setSelectedHostObj(null);
+    setCapturedImage(null);
+    setSignatureImage(null);
+    setFormData((prev) => ({
+      ...prev,
+      location: campus,
+      checkInTime: getDateTimeLocalValue(),
+      status: "In",
+      processedBy: securitySession?.name || prev.processedBy || "",
+    }));
   };
 
   // Stage 2: Helper to handle member name addition
@@ -479,12 +613,12 @@ const CheckIn: React.FC = () => {
     }
 
     try {
-      const settingsResponse = await apiService.settings.getAll();
-      const settings: SystemSettings | null = getApiContent<SystemSettings>(
-        settingsResponse,
-        null,
-        "settings",
-      );
+      let settings = cachedSettings;
+      if (!settings) {
+        const settingsResponse = await apiService.settings.getAll();
+        settings = getApiContent<SystemSettings>(settingsResponse, null, "settings");
+        setCachedSettings(settings);
+      }
       const sender = settings?.kiosk?.senderEmail || "notifications@system.com";
 
       if (settings?.notificationsEnabled) {
@@ -609,6 +743,14 @@ const CheckIn: React.FC = () => {
       .slice(0, 15);
   }, [formData.host, availableHosts]);
 
+  const filteredReturningVisitors = useMemo(() => {
+    const query = normalizePhone(phone);
+    if (query.length < 3) return [];
+    return previousVisitors
+      .filter((v) => normalizePhone(v.phone).includes(query))
+      .slice(0, 6);
+  }, [phone, previousVisitors]);
+
   if (step === "phone") {
     return (
       <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-12 font-sans">
@@ -642,9 +784,36 @@ const CheckIn: React.FC = () => {
                   placeholder="000-000-0000"
                   className="w-full pl-16 pr-6 py-8 bg-slate-50 border border-slate-100 rounded-[2rem] focus:ring-4 focus:ring-indigo-500/10 focus:bg-white focus:border-indigo-300 outline-none text-3xl font-black tracking-tighter transition-all"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => {
+                    setPhone(e.target.value);
+                    setSelectedReturningVisitor(null);
+                  }}
                 />
               </div>
+              {filteredReturningVisitors.length > 0 && (
+                <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+                  {filteredReturningVisitors.map((visitor) => (
+                    <button
+                      key={`${normalizePhone(visitor.phone)}-${visitor.name}`}
+                      type="button"
+                      className="w-full text-left px-5 py-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-b-0"
+                      onClick={() => {
+                        setPhone(visitor.phone);
+                        setSelectedReturningVisitor(visitor);
+                        setIsReturningGuest(true);
+                        setError("");
+                      }}
+                    >
+                      <p className="text-sm font-black text-slate-800">
+                        {visitor.name}
+                      </p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        {visitor.phone}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
               <ErrorBanner message={error} />
             </div>
 
@@ -726,7 +895,7 @@ const CheckIn: React.FC = () => {
             desc="Main Corporate Center"
             color="indigo"
             onClick={() => {
-              setFormData({ ...formData, location: "College" });
+              applyVisitorPrefillForCampus("College");
               setStep("form");
             }}
           />
@@ -736,7 +905,7 @@ const CheckIn: React.FC = () => {
             desc="Academic Services"
             color="amber"
             onClick={() => {
-              setFormData({ ...formData, location: "Elementary" });
+              applyVisitorPrefillForCampus("Elementary");
               setStep("form");
             }}
           />

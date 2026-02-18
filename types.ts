@@ -225,6 +225,7 @@ export interface KioskSettings {
 export interface GoogleWorkspaceSettings {
   enabled: boolean;
   domain: string;
+  useCustomerDirectory?: boolean;
   chatNotificationsEnabled: boolean;
   calendarEnabled: boolean;
   webhookUrl?: string; // Optional global webhook

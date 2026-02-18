@@ -41,10 +41,14 @@ const SecurityLogin: React.FC = () => {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   useEffect(() => {
+    const controller = new AbortController();
     const loadData = async () => {
       try {
         // Load security stations from API
-        const stationsResponse = await apiService.securityStation.getAll();
+        const stationsResponse = await apiService.securityStation.getAll(
+          undefined,
+          { signal: controller.signal },
+        );
         const stations = getApiContent<any[]>(
           stationsResponse,
           [],
@@ -53,12 +57,14 @@ const SecurityLogin: React.FC = () => {
         setAvailableStations(stations);
         if (stations.length > 0) setStation(stations[0]);
       } catch (e) {
+        if ((e as any)?.name === "AbortError") return;
         console.error("Failed to load stations from API", e);
         setAvailableStations([]);
         setStation("");
       }
     };
-    loadData();
+    void loadData();
+    return () => controller.abort();
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {

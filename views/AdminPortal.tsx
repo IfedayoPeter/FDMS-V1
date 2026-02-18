@@ -190,6 +190,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
   workspace: {
     enabled: false,
     domain: "exxcel.consulting",
+    useCustomerDirectory: false,
     chatNotificationsEnabled: false,
     calendarEnabled: false,
   },
@@ -4333,6 +4334,37 @@ const WorkspaceSettingsView = ({ settings, onUpdate }: any) => {
         <div className="flex items-center gap-6 bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
           <div className="flex gap-4 items-center flex-1">
             <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all border ${formData.useCustomerDirectory ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-white text-slate-300 border-slate-100"}`}
+            >
+              <Users size={24} />
+            </div>
+            <div>
+              <p className="font-black text-slate-800 text-sm tracking-tight">
+                Sync Entire Workspace Tenant
+              </p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Use customer=my_customer for multi-domain organizations
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() =>
+              setFormData({
+                ...formData,
+                useCustomerDirectory: !formData.useCustomerDirectory,
+              })
+            }
+            className={`relative w-16 h-8 rounded-full transition-all duration-500 ${formData.useCustomerDirectory ? "bg-blue-600" : "bg-slate-300"}`}
+          >
+            <div
+              className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow-lg transition-transform duration-500 ${formData.useCustomerDirectory ? "translate-x-8" : ""}`}
+            />
+          </button>
+        </div>
+        <div className="flex items-center gap-6 bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+          <div className="flex gap-4 items-center flex-1">
+            <div
               className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all border ${formData.chatNotificationsEnabled ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-white text-slate-300 border-slate-100"}`}
             >
               <MessageCircle size={24} />
@@ -7007,26 +7039,16 @@ const HostManagement = () => {
     setLoadingOverlay(true);
     setLoadingMessage("Syncing with Google Workspace");
     try {
-      const workspaceHosts = await workspaceService.fetchDirectory(
+      const result = await workspaceService.fetchDirectory(
         settings.workspace.domain,
+        Boolean(settings.workspace.useCustomerDirectory),
       );
-      const mergedHosts: Array<Omit<Host, "id">> = workspaceHosts.map(
-        (wHost) => {
-          const existing = hosts.find((h) => h.email === wHost.email);
-          return {
-            fullName: wHost.fullName || existing?.fullName || "",
-            department: wHost.department || existing?.department || "",
-            email: wHost.email || existing?.email || "",
-            phone: wHost.phone || existing?.phone || "",
-            status: wHost.status || existing?.status || "Active",
-            googleId: wHost.googleId || existing?.googleId,
-            googleChatSpaceId:
-              wHost.googleChatSpaceId || existing?.googleChatSpaceId,
-            isWorkspaceSynced: true,
-          };
-        },
-      );
-      await importHosts(mergedHosts);
+      await loadHosts({ showOverlay: true, message: "Refreshing Host Registry" });
+      if (result.summary) {
+        alert(
+          `Workspace sync complete.\nFetched: ${result.summary.totalFetched}\nSynced: ${result.summary.totalSynced}\nCreated: ${result.summary.createdCount}\nUpdated: ${result.summary.updatedCount}`,
+        );
+      }
     } catch (e) {
       alert("Failed to sync with Workspace.");
     } finally {
@@ -8772,8 +8794,30 @@ const AdminPortal: React.FC = () => {
     }
   }, [isSidebarCollapsed]);
 
-  const reloadVisitors = useCallback(async () => {
-    const visitorsResp = await apiService.visitor.getAll();
+  type AdminSection =
+    | "settings"
+    | "securityAlerts"
+    | "visitors"
+    | "deliveries"
+    | "keyLogs"
+    | "assetLogs"
+    | "notificationLogs";
+
+  const loadedSectionsRef = useRef<Record<AdminSection, boolean>>({
+    settings: false,
+    securityAlerts: false,
+    visitors: false,
+    deliveries: false,
+    keyLogs: false,
+    assetLogs: false,
+    notificationLogs: false,
+  });
+  const inflightLoadsRef = useRef<Partial<Record<AdminSection, Promise<void>>>>(
+    {},
+  );
+
+  const reloadVisitors = useCallback(async (signal?: AbortSignal) => {
+    const visitorsResp = await apiService.visitor.getAll(undefined, { signal });
     const parsedVisitors = getApiContent<Visitor[]>(
       visitorsResp as ApiEnvelope<Visitor[]>,
       [],
@@ -8782,8 +8826,8 @@ const AdminPortal: React.FC = () => {
     setVisitors(parsedVisitors);
   }, []);
 
-  const reloadDeliveries = useCallback(async () => {
-    const deliveriesResp = await apiService.delivery.getAll();
+  const reloadDeliveries = useCallback(async (signal?: AbortSignal) => {
+    const deliveriesResp = await apiService.delivery.getAll(undefined, { signal });
     const parsedDeliveries = getApiContent<DeliveryRecord[]>(
       deliveriesResp as ApiEnvelope<DeliveryRecord[]>,
       [],
@@ -8792,8 +8836,8 @@ const AdminPortal: React.FC = () => {
     setDeliveries(parsedDeliveries);
   }, []);
 
-  const reloadKeyLogs = useCallback(async () => {
-    const keyLogsResp = await apiService.keyLog.getAll();
+  const reloadKeyLogs = useCallback(async (signal?: AbortSignal) => {
+    const keyLogsResp = await apiService.keyLog.getAll(undefined, { signal });
     const parsedKeyLogs = getApiContent<KeyLog[]>(
       keyLogsResp as ApiEnvelope<KeyLog[]>,
       [],
@@ -8802,8 +8846,10 @@ const AdminPortal: React.FC = () => {
     setKeyLogs(parsedKeyLogs);
   }, []);
 
-  const reloadAssetLogs = useCallback(async () => {
-    const assetLogsResp = await apiService.assetMovement.getAll();
+  const reloadAssetLogs = useCallback(async (signal?: AbortSignal) => {
+    const assetLogsResp = await apiService.assetMovement.getAll(undefined, {
+      signal,
+    });
     const parsedAssetLogs = getApiContent<AssetMovement[]>(
       assetLogsResp as ApiEnvelope<AssetMovement[]>,
       [],
@@ -8812,8 +8858,11 @@ const AdminPortal: React.FC = () => {
     setAssetLogs(parsedAssetLogs);
   }, []);
 
-  const reloadNotificationLogs = useCallback(async () => {
-    const notificationLogsResp = await apiService.notificationLog.getAll();
+  const reloadNotificationLogs = useCallback(async (signal?: AbortSignal) => {
+    const notificationLogsResp = await apiService.notificationLog.getAll(
+      undefined,
+      { signal },
+    );
     const parsedNotificationLogs = getApiContent<NotificationLog[]>(
       notificationLogsResp as ApiEnvelope<NotificationLog[]>,
       [],
@@ -8822,158 +8871,191 @@ const AdminPortal: React.FC = () => {
     setNotificationLogs(parsedNotificationLogs);
   }, []);
 
+  const reloadSettings = useCallback(async (signal?: AbortSignal) => {
+    const settingsResp = await apiService.settings.getAll({ signal });
+    const parsedSettings = getApiContent<SystemSettings>(
+      settingsResp as ApiEnvelope<SystemSettings>,
+      DEFAULT_SETTINGS,
+      "settings",
+    );
+    if (parsedSettings) {
+      setSettings({
+        ...DEFAULT_SETTINGS,
+        ...(parsedSettings as any),
+        kiosk: {
+          ...DEFAULT_SETTINGS.kiosk,
+          ...((parsedSettings as any).kiosk || {}),
+        },
+        workspace: {
+          ...DEFAULT_SETTINGS.workspace,
+          ...((parsedSettings as any).workspace || {}),
+        },
+      });
+    }
+  }, []);
+
+  const reloadSecurityAlerts = useCallback(async (signal?: AbortSignal) => {
+    const alertsResp = await apiService.securityAlert.getAll(undefined, {
+      signal,
+    });
+    const parsedSecurityAlerts = getApiContent<SecurityAlert[]>(
+      alertsResp as ApiEnvelope<SecurityAlert[]>,
+      [],
+      "security alerts",
+    );
+    setSecurityAlerts(parsedSecurityAlerts);
+  }, []);
+
+  const runSectionLoad = useCallback(
+    async (
+      section: AdminSection,
+      loader: (signal?: AbortSignal) => Promise<void>,
+      signal?: AbortSignal,
+      force = false,
+    ) => {
+      if (!force && loadedSectionsRef.current[section]) return;
+      if (!force && inflightLoadsRef.current[section]) {
+        await inflightLoadsRef.current[section];
+        return;
+      }
+      const task = (async () => {
+        await loader(signal);
+        loadedSectionsRef.current[section] = true;
+      })().finally(() => {
+        delete inflightLoadsRef.current[section];
+      });
+      inflightLoadsRef.current[section] = task;
+      await task;
+    },
+    [],
+  );
+
+  const resolveRequiredSections = useCallback((path: string): AdminSection[] => {
+    if (path.startsWith("/admin/visitors")) return ["settings", "visitors"];
+    if (path.startsWith("/admin/deliveries")) return ["settings", "deliveries"];
+    if (path.startsWith("/admin/keys")) return ["settings", "keyLogs"];
+    if (path.startsWith("/admin/logistics")) return ["settings", "assetLogs"];
+    if (path.startsWith("/admin/notifications"))
+      return ["settings", "notificationLogs"];
+    if (path.startsWith("/admin/settings")) return ["settings", "securityAlerts"];
+    if (path === "/admin" || path === "/admin/")
+      return ["settings", "visitors", "deliveries", "keyLogs"];
+    return ["settings"];
+  }, []);
+
+  const getLoadingMessageForPath = useCallback((path: string) => {
+    if (path.startsWith("/admin/visitors")) return "Loading Visitor Registry";
+    if (path.startsWith("/admin/deliveries")) return "Loading Deliveries";
+    if (path.startsWith("/admin/keys")) return "Loading Access Key Activity";
+    if (path.startsWith("/admin/logistics")) return "Loading Asset Movement Log";
+    if (path.startsWith("/admin/notifications")) return "Loading Notifications";
+    if (path.startsWith("/admin/settings")) return "Loading Settings";
+    return "Loading Admin Console";
+  }, []);
+
   useEffect(() => {
-    const loadAdminData = async () => {
-      setLoadingOverlay(true);
-      setLoadingMessage("Loading Admin Console");
-      setError("");
-      try {
-        const [
-          visitorsResp,
-          deliveriesResp,
-          keyLogsResp,
-          assetLogsResp,
-          notificationLogsResp,
-          settingsResp,
-          alertsResp,
-        ] = await Promise.all([
-          apiService.visitor.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(error, "Failed to load visitors"),
-          })),
-          apiService.delivery.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(
-              error,
-              "Failed to load deliveries",
-            ),
-          })),
-          apiService.keyLog.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(error, "Failed to load key logs"),
-          })),
-          apiService.assetMovement.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(
-              error,
-              "Failed to load asset movements",
-            ),
-          })),
-          apiService.notificationLog.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(
-              error,
-              "Failed to load notification logs",
-            ),
-          })),
-          apiService.settings.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(
-              error,
-              "Failed to load system settings",
-            ),
-          })),
-          apiService.securityAlert.getAll().catch((error) => ({
-            hasError: true,
-            errorMessage: getApiErrorMessage(
-              error,
-              "Failed to load security alerts",
-            ),
-          })),
-        ]);
+    let cancelled = false;
+    const controller = new AbortController();
+    const loadForCurrentPath = async () => {
+      const requiredSections = resolveRequiredSections(location.pathname);
+      const missingSections = requiredSections.filter(
+        (section) => !loadedSectionsRef.current[section],
+      );
 
-        const parsedVisitors = getApiContent<Visitor[]>(
-          visitorsResp as ApiEnvelope<Visitor[]>,
-          [],
-          "visitors",
-        );
-        const parsedDeliveries = getApiContent<DeliveryRecord[]>(
-          deliveriesResp as ApiEnvelope<DeliveryRecord[]>,
-          [],
-          "deliveries",
-        );
-        const parsedKeyLogs = getApiContent<KeyLog[]>(
-          keyLogsResp as ApiEnvelope<KeyLog[]>,
-          [],
-          "key logs",
-        );
-        const parsedAssetLogs = getApiContent<AssetMovement[]>(
-          assetLogsResp as ApiEnvelope<AssetMovement[]>,
-          [],
-          "asset movements",
-        );
-        const parsedNotificationLogs = getApiContent<NotificationLog[]>(
-          notificationLogsResp as ApiEnvelope<NotificationLog[]>,
-          [],
-          "notification logs",
-        );
-        const parsedSecurityAlerts = getApiContent<SecurityAlert[]>(
-          alertsResp as ApiEnvelope<SecurityAlert[]>,
-          [],
-          "security alerts",
-        );
-
-        setVisitors(parsedVisitors);
-        setDeliveries(parsedDeliveries);
-        setKeyLogs(parsedKeyLogs);
-        setAssetLogs(parsedAssetLogs);
-        setNotificationLogs(parsedNotificationLogs);
-        setSecurityAlerts(parsedSecurityAlerts);
-
-        const parsedSettings = getApiContent<SystemSettings>(
-          settingsResp as ApiEnvelope<SystemSettings>,
-          DEFAULT_SETTINGS,
-          "settings",
-        );
-        if (parsedSettings) {
-          setSettings({
-            ...DEFAULT_SETTINGS,
-            ...(parsedSettings as any),
-            kiosk: {
-              ...DEFAULT_SETTINGS.kiosk,
-              ...((parsedSettings as any).kiosk || {}),
-            },
-            workspace: {
-              ...DEFAULT_SETTINGS.workspace,
-              ...((parsedSettings as any).workspace || {}),
-            },
-          });
-        }
-
-        const fetchInsights = async () => {
-          try {
-            const text = await getAdminInsights(
-              parsedVisitors,
-              parsedDeliveries,
-              parsedKeyLogs,
-            );
-            setInsights(text || "No insights available.");
-          } catch (insightError) {
-            console.error("Error fetching insights:", insightError);
-            setInsights("Unable to generate insights at this time.");
-          }
-        };
-
-        if (
-          parsedVisitors.length > 0 ||
-          parsedDeliveries.length > 0 ||
-          parsedKeyLogs.length > 0
-        ) {
-          fetchInsights();
-        }
-      } catch (error) {
-        console.error("Error loading admin data:", error);
-        setSettings(DEFAULT_SETTINGS);
-        setError(
-          getApiErrorMessage(error, "Failed to load admin console data"),
-        );
-      } finally {
+      if (missingSections.length === 0) {
         setLoadingOverlay(false);
+        return;
+      }
+
+      setLoadingOverlay(true);
+      setLoadingMessage(getLoadingMessageForPath(location.pathname));
+      setError("");
+
+      try {
+        const loaders: Record<
+          AdminSection,
+          (signal?: AbortSignal) => Promise<void>
+        > = {
+          settings: reloadSettings,
+          securityAlerts: reloadSecurityAlerts,
+          visitors: reloadVisitors,
+          deliveries: reloadDeliveries,
+          keyLogs: reloadKeyLogs,
+          assetLogs: reloadAssetLogs,
+          notificationLogs: reloadNotificationLogs,
+        };
+        await Promise.all(
+          missingSections.map((section) =>
+            runSectionLoad(section, loaders[section], controller.signal),
+          ),
+        );
+      } catch (loadError) {
+        if ((loadError as any)?.name === "AbortError") return;
+        console.error("Error loading admin data:", loadError);
+        if (!cancelled) {
+          setError(
+            getApiErrorMessage(loadError, "Failed to load admin console data"),
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingOverlay(false);
+        }
       }
     };
 
-    loadAdminData();
-  }, []);
+    void loadForCurrentPath();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    location.pathname,
+    getLoadingMessageForPath,
+    reloadAssetLogs,
+    reloadDeliveries,
+    reloadKeyLogs,
+    reloadNotificationLogs,
+    reloadSecurityAlerts,
+    reloadSettings,
+    reloadVisitors,
+    resolveRequiredSections,
+    runSectionLoad,
+  ]);
+
+  useEffect(() => {
+    const isDashboardPath =
+      location.pathname === "/admin" || location.pathname === "/admin/";
+    if (!isDashboardPath) return;
+
+    if (
+      !loadedSectionsRef.current.visitors ||
+      !loadedSectionsRef.current.deliveries ||
+      !loadedSectionsRef.current.keyLogs
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const fetchInsights = async () => {
+      try {
+        const text = await getAdminInsights(visitors, deliveries, keyLogs);
+        if (!cancelled) {
+          setInsights(text || "No insights available.");
+        }
+      } catch (insightError) {
+        console.error("Error fetching insights:", insightError);
+        if (!cancelled) {
+          setInsights("Unable to generate insights at this time.");
+        }
+      }
+    };
+
+    void fetchInsights();
+    return () => {
+      cancelled = true;
+    };
+  }, [deliveries, keyLogs, location.pathname, visitors]);
 
   const deleteRecord = async (type: string, id: number | string) => {
     const numericId = Number(id);
@@ -9103,33 +9185,6 @@ const AdminPortal: React.FC = () => {
     }
   };
 
-  const reloadForPath = async (path: string) => {
-    try {
-      if (path.startsWith("/admin/visitors")) {
-        await reloadVisitors();
-      } else if (path.startsWith("/admin/deliveries")) {
-        await reloadDeliveries();
-      } else if (path.startsWith("/admin/keys")) {
-        await reloadKeyLogs();
-      } else if (path.startsWith("/admin/logistics")) {
-        await reloadAssetLogs();
-      } else if (path.startsWith("/admin/notifications")) {
-        await reloadNotificationLogs();
-      } else if (path === "/admin" || path.startsWith("/admin/settings")) {
-        await Promise.all([
-          reloadVisitors(),
-          reloadDeliveries(),
-          reloadKeyLogs(),
-          reloadAssetLogs(),
-          reloadNotificationLogs(),
-        ]);
-      }
-    } catch (reloadError) {
-      console.error("Failed to refresh section data:", reloadError);
-      setError(getApiErrorMessage(reloadError, "Failed to refresh list"));
-    }
-  };
-
   const tabs = [
     { label: "Dashboard", icon: LayoutDashboard, path: "/admin" },
     { label: "Visitors", icon: Users, path: "/admin/visitors" },
@@ -9206,9 +9261,6 @@ const AdminPortal: React.FC = () => {
             <Link
               key={tab.label}
               to={tab.path}
-              onClick={() => {
-                void reloadForPath(tab.path);
-              }}
               title={isSidebarCollapsed ? undefined : tab.label}
               className={`relative flex items-center ${isSidebarCollapsed ? "justify-center px-2" : "gap-4 px-6"} py-4 rounded-2xl transition-all group ${currentTab === tab.label ? "bg-zinc-50 text-black shadow-sm" : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"}`}
             >

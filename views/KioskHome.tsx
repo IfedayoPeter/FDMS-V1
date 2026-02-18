@@ -77,13 +77,16 @@ const KioskHome: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     const loadDashboardData = async () => {
       try {
         setIsLoading(true);
         const sessionData = localStorage.getItem("securitySession");
         if (sessionData) setSecuritySession(JSON.parse(sessionData));
 
-        const settingsResponse = await apiService.settings.getAll();
+        const settingsResponse = await apiService.settings.getAll({
+          signal: controller.signal,
+        });
         const settings = getApiContent<SystemSettings | null>(
           settingsResponse,
           null,
@@ -97,7 +100,7 @@ const KioskHome: React.FC = () => {
           filter: "status=In",
           page: 1,
           pageSize: 100,
-        });
+        }, { signal: controller.signal });
         const activeVisitors = getApiContent<Visitor[]>(
           visitorsResponse,
           [],
@@ -115,6 +118,7 @@ const KioskHome: React.FC = () => {
         //   setOverdueKeys(keyOverdueResponse.content);
         // }
       } catch (error) {
+        if ((error as any)?.name === "AbortError") return;
         console.error(
           "Error loading dashboard data:",
           getApiErrorMessage(error, "Failed to load dashboard data"),
@@ -125,8 +129,9 @@ const KioskHome: React.FC = () => {
       }
     };
 
-    loadDashboardData();
-  }, [time.getMinutes()]);
+    void loadDashboardData();
+    return () => controller.abort();
+  }, []);
 
   const handleEndSession = () => {
     localStorage.removeItem("securitySession");
