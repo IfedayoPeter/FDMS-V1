@@ -249,7 +249,7 @@ const CheckIn: React.FC = () => {
         const visitorsResponse = await apiService.visitor.getAll({
           pageSize: 500,
           orderBy: "checkInTime",
-          orderDirection: 2,
+          orderDirection: 1,
         }, { signal: controller.signal });
         const visitorRecords = getApiContent<any[]>(
           visitorsResponse,
